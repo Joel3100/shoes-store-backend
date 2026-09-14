@@ -1,0 +1,330 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  CUSTOMER
+  ADMIN
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  phone        String?
+  role         Role     @default(CUSTOMER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  addresses        Address[]
+  cart             Cart?
+  orders           Order[]
+  verifiedPayments Payment[]           @relation("PaymentVerifier")
+  notifications    Notification[]
+  inventoryActions InventoryMovement[] @relation("InventoryActor")
+  auditActions     AuditLog[]          @relation("AuditActor")
+
+  @@map("users")
+}
+
+model Address {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  label      String?
+  recipient  String
+  phone      String
+  city       String
+  subCity    String?
+  streetLine String
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+model Category {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  products Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id         String   @id @default(uuid())
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  name        String
+  slug        String   @unique
+  description String?
+  brand       String
+  basePrice   Decimal  @db.Decimal(10, 2)
+  discount    Decimal? @db.Decimal(5, 2)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  variants ProductVariant[]
+  images   ProductImage[]
+
+  @@index([categoryId])
+  @@map("products")
+}
+
+model ProductVariant {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  color         String
+  size          String
+  sku           String   @unique
+  stock         Int      @default(0)
+  priceOverride Decimal? @db.Decimal(10, 2)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  cartItems          CartItem[]
+  orderItems         OrderItem[]
+  inventoryMovements InventoryMovement[]
+
+  @@unique([productId, color, size])
+  @@index([productId])
+  @@map("product_variants")
+}
+
+model ProductImage {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  data      Bytes
+  mimeType  String
+  altText   String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+model Cart {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id     String @id @default(uuid())
+  cartId String
+  cart   Cart   @relation(fields: [cartId], references: [id])
+
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cartId, variantId])
+  @@map("cart_items")
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  PAYMENT_FAILED
+  REFUND_REQUESTED
+  REFUNDED
+}
+
+enum PaymentProvider {
+  CHAPA
+  MANUAL_BANK
+}
+
+enum PaymentStatus {
+  PENDING
+  PENDING_VERIFICATION
+  SUCCESS
+  VERIFIED
+  FAILED
+  REJECTED
+  REFUNDED
+}
+
+model Order {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  status OrderStatus @default(PENDING_PAYMENT)
+
+  subtotal       Decimal @db.Decimal(10, 2)
+  deliveryFee    Decimal @default(0) @db.Decimal(10, 2)
+  discountAmount Decimal @default(0) @db.Decimal(10, 2)
+  totalAmount    Decimal @db.Decimal(10, 2)
+
+  recipientName   String
+  recipientPhone  String
+  shippingCity    String
+  shippingSubCity String?
+  shippingStreet  String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items   OrderItem[]
+  payment Payment?
+
+  @@index([userId])
+  @@index([status])
+  @@map("orders")
+}
+
+model OrderItem {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id])
+
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+
+  productNameSnap String
+  skuSnap         String
+  colorSnap       String
+  sizeSnap        String
+  unitPriceSnap   Decimal @db.Decimal(10, 2)
+  quantity        Int
+  lineTotal       Decimal @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model Payment {
+  id      String @id @default(uuid())
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id])
+
+  provider PaymentProvider
+  status   PaymentStatus   @default(PENDING)
+  amount   Decimal         @db.Decimal(10, 2)
+  currency String          @default("ETB")
+
+  providerRef     String? @unique
+  manualReference String?
+  receiptData     Bytes?
+  receiptMimeType String?
+
+  verifiedById String?
+  verifiedBy   User?     @relation("PaymentVerifier", fields: [verifiedById], references: [id])
+  verifiedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events PaymentEvent[]
+
+  @@map("payments")
+}
+
+model PaymentEvent {
+  id        String  @id @default(uuid())
+  paymentId String
+  payment   Payment @relation(fields: [paymentId], references: [id])
+
+  eventType String
+  payload   Json
+
+  createdAt DateTime @default(now())
+
+  @@index([paymentId])
+  @@map("payment_events")
+}
+
+enum MovementReason {
+  ORDER_PLACED
+  ORDER_CANCELLED
+  ADMIN_RESTOCK
+  ADMIN_ADJUSTMENT
+  REFUND_RESTOCK
+}
+
+model InventoryMovement {
+  id        String         @id @default(uuid())
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+
+  quantity      Int
+  reason        MovementReason
+  orderId       String?
+  performedById String?
+  performedBy   User?          @relation("InventoryActor", fields: [performedById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([variantId])
+  @@map("inventory_movements")
+}
+
+model Notification {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  isForAdmin     Boolean  @default(false)
+  type           String
+  message        String
+  relatedOrderId String?
+  isRead         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id      String @id @default(uuid())
+  actorId String
+  actor   User   @relation("AuditActor", fields: [actorId], references: [id])
+
+  action     String
+  targetType String
+  targetId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@map("audit_logs")
+}
