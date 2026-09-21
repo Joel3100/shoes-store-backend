@@ -15,7 +15,10 @@ function slugify(name: string): string {
 const productInclude = {
   category: true,
   variants: { where: { isActive: true } },
-  images: { orderBy: { sortOrder: "asc" as const } },
+  images: {
+    orderBy: { sortOrder: "asc" as const },
+    select: { id: true, productId: true, mimeType: true, sortOrder: true, createdAt: true },
+  },
 };
 
 export async function createProduct(input: CreateProductInput) {
