@@ -2,11 +2,13 @@ import { PrismaClient } from "../../generated/prisma/client";
 import { AppError } from "../../utils/AppError";
 import { PaymentProvider } from "./payment.types";
 import { ManualBankProvider } from "./providers/manualBank.provider";
+import { ChapaProvider } from "./providers/chapa.provider";
 
 const prisma = new PrismaClient();
 
 const providers: Record<string, PaymentProvider> = {
   MANUAL_BANK: new ManualBankProvider(),
+  CHAPA: new ChapaProvider(),
 };
 
 function getProvider(providerName: string): PaymentProvider {
