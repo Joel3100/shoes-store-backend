@@ -20,7 +20,7 @@ async function main() {
   console.log("Stock set to 1. Firing 5 concurrent purchase attempts for 1 unit each...");
 
   const attempts = Array.from({ length: 5 }, (_, i) =>
-    decreaseStock(variantId, 1, "ORDER_PLACED")
+    prisma.$transaction((tx) => decreaseStock(tx, variantId, 1, "ORDER_PLACED"))
       .then(() => ({ attempt: i + 1, result: "SUCCESS" }))
       .catch((err) => ({ attempt: i + 1, result: "FAILED", message: err.message }))
   );

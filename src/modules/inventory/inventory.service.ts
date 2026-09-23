@@ -1,68 +1,50 @@
-import { PrismaClient, MovementReason } from "../../generated/prisma/client";
+import { PrismaClient, Prisma, MovementReason } from "../../generated/prisma/client";
 import { AppError } from "../../utils/AppError";
 
 const prisma = new PrismaClient();
 
 export async function decreaseStock(
+  tx: Prisma.TransactionClient,
   variantId: string,
   quantity: number,
   reason: MovementReason,
   orderId?: string
 ) {
-  return prisma.$transaction(async (tx) => {
-    const result = await tx.productVariant.updateMany({
-      where: {
-        id: variantId,
-        stock: { gte: quantity },
-      },
-      data: {
-        stock: { decrement: quantity },
-      },
-    });
+  const result = await tx.productVariant.updateMany({
+    where: { id: variantId, stock: { gte: quantity } },
+    data: { stock: { decrement: quantity } },
+  });
 
-    if (result.count === 0) {
-      throw new AppError("Insufficient stock for this item", 409);
-    }
+  if (result.count === 0) {
+    throw new AppError("Insufficient stock for this item", 409);
+  }
 
-    await tx.inventoryMovement.create({
-      data: {
-        variantId,
-        quantity: -quantity,
-        reason,
-        orderId,
-      },
-    });
+  await tx.inventoryMovement.create({
+    data: { variantId, quantity: -quantity, reason, orderId },
   });
 }
 
 export async function increaseStock(
+  tx: Prisma.TransactionClient,
   variantId: string,
   quantity: number,
   reason: MovementReason,
   orderId?: string,
   performedById?: string
 ) {
-  return prisma.$transaction(async (tx) => {
-    await tx.productVariant.update({
-      where: { id: variantId },
-      data: { stock: { increment: quantity } },
-    });
+  await tx.productVariant.update({
+    where: { id: variantId },
+    data: { stock: { increment: quantity } },
+  });
 
-    await tx.inventoryMovement.create({
-      data: {
-        variantId,
-        quantity,
-        reason,
-        orderId,
-        performedById,
-      },
-    });
+  await tx.inventoryMovement.create({
+    data: { variantId, quantity, reason, orderId, performedById },
   });
 }
 
 export async function restockVariant(
-  variantId: string,
-  quantity: number,
+  variantId: string, 
+  quantity: number, 
   performedById: string
 ) {
   const variant = await prisma.productVariant.findUnique({ where: { id: variantId } });
@@ -71,7 +53,9 @@ export async function restockVariant(
     throw new AppError("Variant not found", 404);
   }
 
-  await increaseStock(variantId, quantity, "ADMIN_RESTOCK", undefined, performedById);
+  await prisma.$transaction((tx) =>
+    increaseStock(tx, variantId, quantity, "ADMIN_RESTOCK", undefined, performedById)
+  );
 
   return prisma.productVariant.findUnique({ where: { id: variantId } });
 }
@@ -105,4 +89,4 @@ export async function listMovementsForVariant(variantId: string) {
     },
     orderBy: { createdAt: "desc" },
   });
-}
+} 
