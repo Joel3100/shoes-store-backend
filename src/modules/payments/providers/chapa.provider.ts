@@ -1,14 +1,17 @@
 import axios from "axios";
 import { PaymentProvider, InitializePaymentResult, VerifyPaymentResult } from "../payment.types";
 import { AppError } from "../../../utils/AppError";
+import crypto from "crypto";
 
-const chapaClient = axios.create({
-  baseURL: process.env.CHAPA_BASE_URL,
-  headers: {
-    Authorization: `Bearer ${process.env.CHAPA_SECRET_KEY}`,
-    "Content-Type": "application/json",
-  },
-});
+function getChapaClient() {
+  return axios.create({
+    baseURL: process.env.CHAPA_BASE_URL,
+    headers: {
+      Authorization: `Bearer ${process.env.CHAPA_SECRET_KEY}`,
+      "Content-Type": "application/json",
+    },
+  });
+}
 
 export class ChapaProvider implements PaymentProvider {
   name = "CHAPA" as const;
@@ -22,7 +25,7 @@ export class ChapaProvider implements PaymentProvider {
     const txRef = `SHOE-${params.orderId}`;
 
     try {
-      const response = await chapaClient.post("/transaction/initialize", {
+      const response = await getChapaClient().post("/transaction/initialize", {
         amount: params.amount.toString(),
         currency: params.currency,
         email: params.customerEmail,
@@ -49,9 +52,32 @@ export class ChapaProvider implements PaymentProvider {
     }
   }
 
-  async verifyPayment(): Promise<VerifyPaymentResult> {
-    throw new Error(
-      "ChapaProvider.verifyPayment is implemented in Phase 13, wired to the webhook handler."
-    );
+  async verifyPayment(payload: any): Promise<VerifyPaymentResult> {
+    const txRef = payload?.tx_ref;
+
+    if (!txRef) {
+      throw new AppError("Webhook payload missing tx_ref", 400);
+    }
+
+    const response = await getChapaClient().get(`/transaction/verify/${txRef}`);
+    const data = response.data.data;
+
+    return {
+      success: data.status === "success",
+      providerRef: txRef,
+      amountPaid: Number(data.amount),
+      rawPayload: payload,
+    };
   }
+}
+
+export function verifyChapaSignature(payload: unknown, signatureHeader: string | undefined): boolean {
+  if (!signatureHeader) return false;
+
+  const expected = crypto
+    .createHmac("sha256", process.env.CHAPA_WEBHOOK_SECRET as string)
+    .update(JSON.stringify(payload))
+    .digest("hex");
+
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signatureHeader));
 }
