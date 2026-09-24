@@ -4,6 +4,7 @@ import { PaymentProvider } from "./payment.types";
 import { ManualBankProvider } from "./providers/manualBank.provider";
 import { ChapaProvider } from "./providers/chapa.provider";
 import { increaseStock } from "../inventory/inventory.service";
+import { createNotification, notifyAllAdmins } from "../notifications/notification.service";
 
 const prisma = new PrismaClient();
 
@@ -84,7 +85,7 @@ export async function completePaymentFromProvider(providerName: string, rawPaylo
     return { alreadyProcessed: true, payment };
   }
 
-  return prisma.$transaction(async (tx) => {
+  const result2 = await prisma.$transaction(async (tx) => {
     await tx.paymentEvent.create({
       data: {
         paymentId: payment.id,
@@ -116,4 +117,33 @@ export async function completePaymentFromProvider(providerName: string, rawPaylo
 
     return { alreadyProcessed: false, payment: updatedPayment };
   });
-}
+
+  if (!result2.alreadyProcessed) {
+    const order = await prisma.order.findUnique({ where: { id: payment.orderId } });
+
+    if (result2.payment.status === "SUCCESS") {
+      await createNotification({
+        userId: order!.userId,
+        isForAdmin: false,
+        type: "PAYMENT_SUCCESS",
+        message: `Payment received for order #${order!.id.slice(0, 8)}. Your order is being processed.`,
+        relatedOrderId: order!.id,
+      });
+      await notifyAllAdmins({
+        type: "PAYMENT_RECEIVED",
+        message: `Payment confirmed for order #${order!.id.slice(0, 8)}.`,
+        relatedOrderId: order!.id,
+      });
+    } else {
+      await createNotification({
+        userId: order!.userId,
+        isForAdmin: false,
+        type: "PAYMENT_FAILED",
+        message: `Payment for order #${order!.id.slice(0, 8)} failed. Please try again.`,
+        relatedOrderId: order!.id,
+      });
+    }
+  }
+
+  return result2;
+} 

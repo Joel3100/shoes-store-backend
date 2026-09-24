@@ -1,7 +1,9 @@
 import { PrismaClient, Prisma, MovementReason } from "../../generated/prisma/client";
 import { AppError } from "../../utils/AppError";
+import { notifyAllAdmins } from "../notifications/notification.service";
 
 const prisma = new PrismaClient();
+const LOW_STOCK_THRESHOLD = 5;
 
 export async function decreaseStock(
   tx: Prisma.TransactionClient,
@@ -22,6 +24,18 @@ export async function decreaseStock(
   await tx.inventoryMovement.create({
     data: { variantId, quantity: -quantity, reason, orderId },
   });
+
+  const updated = await tx.productVariant.findUnique({
+    where: { id: variantId },
+    include: { product: { select: { name: true } } },
+  });
+
+  if (updated && updated.stock <= LOW_STOCK_THRESHOLD) {
+    await notifyAllAdmins({
+      type: "LOW_STOCK",
+      message: `${updated.product.name} (${updated.color}, ${updated.size}) is low on stock: ${updated.stock} left.`,
+    });
+  }
 }
 
 export async function increaseStock(
@@ -60,8 +74,6 @@ export async function restockVariant(
   return prisma.productVariant.findUnique({ where: { id: variantId } });
 }
 
-const LOW_STOCK_THRESHOLD = 5;
-
 export async function listLowStockVariants(threshold: number = LOW_STOCK_THRESHOLD) {
   return prisma.productVariant.findMany({
     where: {
@@ -89,4 +101,4 @@ export async function listMovementsForVariant(variantId: string) {
     },
     orderBy: { createdAt: "desc" },
   });
-} 
+}

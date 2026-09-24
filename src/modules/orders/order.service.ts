@@ -2,6 +2,7 @@ import { PrismaClient, Prisma } from "../../generated/prisma/client";
 import { AppError } from "../../utils/AppError";
 import { decreaseStock } from "../inventory/inventory.service";
 import { CheckoutInput } from "./order.validator";
+import { createNotification, notifyAllAdmins } from "../notifications/notification.service";
 
 const prisma = new PrismaClient();
 
@@ -24,7 +25,7 @@ export async function createOrderFromCart(userId: string, input: CheckoutInput) 
     throw new AppError("Your cart is empty", 400);
   }
 
-  return prisma.$transaction(async (tx) => {
+  const order = await prisma.$transaction(async (tx) => {
     let subtotal = new Prisma.Decimal(0);
     const orderItemsData = [];
 
@@ -83,6 +84,22 @@ export async function createOrderFromCart(userId: string, input: CheckoutInput) 
 
     return order;
   });
+
+  await createNotification({
+    userId,
+    isForAdmin: false,
+    type: "ORDER_CONFIRMED",
+    message: `Your order #${order.id.slice(0, 8)} has been placed and is awaiting payment.`,
+    relatedOrderId: order.id,
+  });
+
+  await notifyAllAdmins({
+    type: "NEW_ORDER",
+    message: `New order #${order.id.slice(0, 8)} placed for ${order.totalAmount} ETB.`,
+    relatedOrderId: order.id,
+  });
+
+  return order;
 }
 
 export async function listOrdersForUser(userId: string) {
