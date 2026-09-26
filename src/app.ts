@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -7,17 +10,37 @@ import routes from "./routes";
 
 const app = express();
 
-const allowedOrigins = [
-  process.env.CUSTOMER_SITE_URL,
-  process.env.ADMIN_PANEL_URL,
-].filter((origin): origin is string => Boolean(origin));
+const allowedOrigins = Array.from(
+  new Set([
+    "http://localhost:5173",
+    "http://localhost:5174",
+    process.env.CUSTOMER_SITE_URL,
+    process.env.ADMIN_PANEL_URL,
+  ].filter((origin): origin is string => typeof origin === "string" && origin.length > 0))
+);
+
+console.log("CORS allowed origins:", allowedOrigins);
 
 app.use(requestLogger);
 
 app.use(
   cors({
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
