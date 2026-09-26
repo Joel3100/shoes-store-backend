@@ -27,3 +27,21 @@ export const getMyOrder = asyncHandler(async (req: Request, res: Response) => {
   const order = await orderService.getOrderById(req.user!.id, orderId);
   res.status(200).json({ order });
 });
+
+export const listAll = asyncHandler(async (req: Request, res: Response) => {
+  const orders = await orderService.listAllOrders({ status: req.query.status as string | undefined });
+  res.status(200).json({ orders });
+});
+
+export const getOneAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const orderId = getParamValue(req.params.id);
+  const order = await orderService.getOrderByIdAdmin(orderId);
+  res.status(200).json({ order });
+});
+
+export const updateStatus = asyncHandler(async (req: Request, res: Response) => {
+  const { status } = req.body;
+  const orderId = getParamValue(req.params.id);
+  const order = await orderService.updateOrderStatusAdmin(orderId, status, req.user!.id);
+  res.status(200).json({ order });
+});

@@ -1,6 +1,6 @@
 import { PrismaClient, Prisma } from "../../generated/prisma/client";
 import { AppError } from "../../utils/AppError";
-import { decreaseStock } from "../inventory/inventory.service";
+import { decreaseStock, increaseStock } from "../inventory/inventory.service";
 import { CheckoutInput } from "./order.validator";
 import { createNotification, notifyAllAdmins } from "../notifications/notification.service";
 
@@ -11,6 +11,16 @@ const DELIVERY_FEE = new Prisma.Decimal(150);
 const orderInclude = {
   items: true,
   payment: true,
+};
+
+const ADMIN_SETTABLE_TRANSITIONS: Record<string, string[]> = {
+  PENDING_PAYMENT: ["CANCELLED"],
+  PAID: ["PROCESSING", "CANCELLED"],
+  PROCESSING: ["SHIPPED", "CANCELLED"],
+  SHIPPED: ["DELIVERED"],
+  DELIVERED: ["REFUND_REQUESTED"],
+  REFUND_REQUESTED: ["REFUNDED"],
+  PAYMENT_FAILED: ["CANCELLED"],
 };
 
 export async function createOrderFromCart(userId: string, input: CheckoutInput) {
@@ -121,4 +131,81 @@ export async function getOrderById(userId: string, orderId: string) {
   }
 
   return order;
+}
+
+export async function listAllOrders(filters: { status?: string }) {
+  return prisma.order.findMany({
+    where: { ...(filters.status && { status: filters.status as any }) },
+    include: {
+      user: { select: { id: true, fullName: true, email: true } },
+      payment: true,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+export async function getOrderByIdAdmin(orderId: string) {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      user: { select: { id: true, fullName: true, email: true, phone: true } },
+      items: true,
+      payment: { include: { events: true } },
+    },
+  });
+
+  if (!order) {
+    throw new AppError("Order not found", 404);
+  }
+
+  return order;
+}
+
+export async function updateOrderStatusAdmin(
+  orderId: string,
+  newStatus: string,
+  performedById: string
+) {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { items: true },
+  });
+
+  if (!order) {
+    throw new AppError("Order not found", 404);
+  }
+
+  const allowedNext = ADMIN_SETTABLE_TRANSITIONS[order.status] ?? [];
+
+  if (!allowedNext.includes(newStatus)) {
+    throw new AppError(
+      `Cannot move an order from ${order.status} to ${newStatus}`,
+      409
+    );
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.order.update({
+      where: { id: orderId },
+      data: { status: newStatus as any },
+    });
+
+    if (newStatus === "CANCELLED") {
+      for (const item of order.items) {
+        await increaseStock(tx, item.variantId, item.quantity, "ORDER_CANCELLED", orderId);
+      }
+    }
+
+    await tx.auditLog.create({
+      data: {
+        actorId: performedById,
+        action: "ORDER_STATUS_CHANGE",
+        targetType: "Order",
+        targetId: orderId,
+        metadata: { from: order.status, to: newStatus },
+      },
+    });
+
+    return updated;
+  });
 }

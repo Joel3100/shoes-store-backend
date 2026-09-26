@@ -7,6 +7,7 @@ import cartRoutes from "../modules/cart/cart.routes";
 import orderRoutes from "../modules/orders/order.routes";
 import paymentRoutes from "../modules/payments/payment.routes";
 import notificationRoutes from "../modules/notifications/notification.routes";
+import analyticsRoutes from "../modules/analytics/analytics.routes";
 
 const router = Router();
 
@@ -22,5 +23,6 @@ router.use("/cart", cartRoutes);
 router.use("/orders", orderRoutes);
 router.use("/payments", paymentRoutes);
 router.use("/notifications", notificationRoutes);
+router.use("/admin/analytics", analyticsRoutes);
 
 export default router;

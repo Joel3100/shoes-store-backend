@@ -146,4 +146,112 @@ export async function completePaymentFromProvider(providerName: string, rawPaylo
   }
 
   return result2;
-} 
+}
+
+export async function submitManualPaymentProof(
+  userId: string,
+  orderId: string,
+  manualReference: string,
+  receiptFile?: Express.Multer.File
+) {
+  const payment = await prisma.payment.findUnique({
+    where: { orderId },
+    include: { order: true },
+  });
+
+  if (!payment || payment.order.userId !== userId) {
+    throw new AppError("Payment not found", 404);
+  }
+
+  if (payment.provider !== "MANUAL_BANK") {
+    throw new AppError("This order was not set up for manual bank payment", 400);
+  }
+
+  if (payment.status !== "PENDING" && payment.status !== "REJECTED") {
+    throw new AppError(
+      `Cannot submit proof for a payment in ${payment.status} status`,
+      409
+    );
+  }
+
+  const receiptData = receiptFile ? new Uint8Array(receiptFile.buffer) : undefined;
+
+  return prisma.payment.update({
+    where: { id: payment.id },
+    data: {
+      status: "PENDING_VERIFICATION",
+      manualReference,
+      receiptData,
+      receiptMimeType: receiptFile?.mimetype,
+    },
+  });
+}
+
+export async function listPendingManualPayments() {
+  return prisma.payment.findMany({
+    where: { provider: "MANUAL_BANK", status: "PENDING_VERIFICATION" },
+    include: {
+      order: { include: { user: { select: { id: true, fullName: true, email: true } } } },
+    },
+    orderBy: { updatedAt: "asc" },
+  });
+}
+
+export async function verifyManualPayment(paymentId: string, adminId: string) {
+  const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+
+  if (!payment) throw new AppError("Payment not found", 404);
+  if (payment.status !== "PENDING_VERIFICATION") {
+    throw new AppError(`Cannot verify a payment in ${payment.status} status`, 409);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.payment.update({
+      where: { id: paymentId },
+      data: { status: "VERIFIED", verifiedById: adminId, verifiedAt: new Date() },
+    });
+
+    await tx.order.update({
+      where: { id: payment.orderId },
+      data: { status: "PROCESSING" },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        actorId: adminId,
+        action: "PAYMENT_VERIFIED",
+        targetType: "Payment",
+        targetId: paymentId,
+      },
+    });
+
+    return updated;
+  });
+}
+
+export async function rejectManualPayment(paymentId: string, adminId: string) {
+  const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+
+  if (!payment) throw new AppError("Payment not found", 404);
+  if (payment.status !== "PENDING_VERIFICATION") {
+    throw new AppError(`Cannot reject a payment in ${payment.status} status`, 409);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.payment.update({
+      where: { id: paymentId },
+      data: { status: "REJECTED", verifiedById: adminId, verifiedAt: new Date() },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        actorId: adminId,
+        action: "PAYMENT_REJECTED",
+        targetType: "Payment",
+        targetId: paymentId,
+      },
+    });
+
+    return updated;
+  });
+}
