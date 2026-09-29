@@ -7,6 +7,8 @@ import cookieParser from "cookie-parser";
 import { errorHandler } from "./middleware/errorHandler";
 import { requestLogger } from "./middleware/requestLogger";
 import routes from "./routes";
+import { generalLimiter, authLimiter } from "./middleware/rateLimiters";
+import helmet from "helmet";
 
 const app = express();
 
@@ -22,6 +24,8 @@ const allowedOrigins = Array.from(
 console.log("CORS allowed origins:", allowedOrigins);
 
 app.use(requestLogger);
+
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 
 app.use(
   cors({
@@ -46,6 +50,10 @@ app.use(
 
 app.use(express.json());
 app.use(cookieParser());
+
+app.use("/api", generalLimiter);
+app.use("/api/auth/login", authLimiter);
+app.use("/api/auth/register", authLimiter);
 
 app.use("/api", routes);
 
